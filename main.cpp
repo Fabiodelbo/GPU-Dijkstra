@@ -42,7 +42,8 @@ int main()
 
     start_gpu = std::chrono::high_resolution_clock::now();
     //dijkstra_parallelize_naive(gen_graph, 0, dist_gpu, VERTEX);
-    dijkstra_parallelize_shared(gen_graph, 0, dist_gpu);
+    //dijkstra_parallelize_shared(gen_graph, 0, dist_gpu);
+    dijkstra_parallelize_shared_atomic(gen_graph, 0, dist_gpu);
     end_gpu = std::chrono::high_resolution_clock::now();
 
 

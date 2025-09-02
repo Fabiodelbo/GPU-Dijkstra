@@ -9,6 +9,20 @@
 #include "../include/cuda_kernel.cuh"
 
 
+__device__ unsigned long long global_min = 0x7FFFFFFF<<32;
+__device__ int global_u = 0;
+__device__ inline unsigned long long packMin(int val, int idx) {
+    // Valore nei 32 bit alti, indice nei 32 bit bassi
+    return (((unsigned long long)(unsigned int)val) << 32) | (unsigned int)idx;
+}
+
+__device__ inline int unpackVal(unsigned long long x) {
+    return (int)(x >> 32);
+}
+
+__device__ inline int unpackIdx(unsigned long long x) {
+    return (int)(x & 0xFFFFFFFF);
+}
 
 // TODO: Define the kernel function right here
 __global__ void short_path_update_naive(short* graph, short* dist, int* u, int V){
@@ -216,6 +230,7 @@ void dijkstra_parallelize_shared(short* graph, int src, short* dist)
     short *graph_d, *dist_d, *relaxed_val;
     bool  *sptSet_d;
     int   *relaxed_idx_d, *node_u;
+    
 
     cudaMalloc(&graph_d,  VERTEX*VERTEX*sizeof(short));
     cudaMalloc(&dist_d,   VERTEX*sizeof(short));
@@ -241,19 +256,20 @@ void dijkstra_parallelize_shared(short* graph, int src, short* dist)
     dim3 block(BLOCK_DIM,1,1);
     dim3 grid(numBlocks,1,1);
 
-    /*Assure that the number of thread is a power of 2 in order to correctly apply the min algorithm in successive halves*/
+    /*Assure that the number of thread is a power of 2 in order to correctly apply the reduction in successive halves*/
     int reduceBlock = 1;
     while (reduceBlock < numBlocks) reduceBlock <<= 1;
     reduceBlock = min(reduceBlock, BLOCK_DIM);
 
     for (int it = 0; it < VERTEX - 1; ++it) {
-        /*find 1 minimum per block */
-        minDistance_kernel_shared<<<grid, block>>>(dist_d, sptSet_d, relaxed_val, relaxed_idx_d);
-        cudaDeviceSynchronize();
-        /*Relax all block's minimum and find the global minimum*/
-        reduceMin_kernel_shared<<<1, reduceBlock>>>(relaxed_val, relaxed_idx_d, sptSet_d, node_u, numBlocks);
-        cudaDeviceSynchronize();
-        /*Relax all the neighbour of the minimum vertex*/
+         /*find 1 minimum per block */
+         minDistance_kernel_shared<<<grid, block>>>(dist_d, sptSet_d, relaxed_val, relaxed_idx_d);
+         cudaDeviceSynchronize();
+         /*Relax all block's minimum and find the global minimum*/
+         reduceMin_kernel_shared<<<1, reduceBlock>>>(relaxed_val, relaxed_idx_d, sptSet_d, node_u, numBlocks);
+         cudaDeviceSynchronize();
+         /*Relax all the neighbour of the minimum vertex*/
+
         short_path_update_naive<<<grid, block>>>(graph_d, dist_d, node_u, VERTEX);
         cudaDeviceSynchronize();
     }
@@ -261,6 +277,127 @@ void dijkstra_parallelize_shared(short* graph, int src, short* dist)
     cudaMemcpy(dist, dist_d, VERTEX*sizeof(short), cudaMemcpyDeviceToHost);
     cudaFree(graph_d); cudaFree(dist_d); cudaFree(sptSet_d);
     cudaFree(relaxed_val); cudaFree(relaxed_idx_d); cudaFree(node_u);
+}
+
+__global__ void fusedMinKernel(short* dist, unsigned char* sptSet, int V, int* node_u) {
+    __shared__ short localMinVal[BLOCK_DIM];
+    __shared__ int localMinIdx[BLOCK_DIM];
+
+    int tid = threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    //Put all non visited node int shared mem
+    if (i < V && !sptSet[i]) {
+        localMinVal[tid] = dist[i];
+        localMinIdx[tid] = i;
+    } else {
+        localMinVal[tid] = (short)0x7FFF;
+        localMinIdx[tid] = -1;
+        //printf("Useless thread\r\n");
+    }
+    __syncthreads();
+
+    // min reduction
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            if (localMinVal[tid+s] < localMinVal[tid]) {
+                localMinVal[tid] = localMinVal[tid+s];
+                localMinIdx[tid] = localMinIdx[tid+s];
+            }
+        }
+        __syncthreads();
+    }
+
+    // thread 0 of each block check if the shared minimal of the block is lower than global minimal
+    if (tid == 0) {
+        //int val = (int)localMinVal[0];
+        //int idx   = localMinIdx[0];
+
+        // checks and set global minimal
+        //printf("%hu, %d\r\n",localMinVal[0],(int)localMinVal[0]);
+        unsigned long long pack = packMin((int)localMinVal[0], localMinIdx[0]);
+        unsigned long long old = atomicMin(&global_min, pack);
+        //printf("block: %d, Local min index: %d, Val:% hu \r\n", blockIdx.x, localMinIdx[0], localMinVal[0]);
+    }
+}
+
+// TODO: Define the kernel function right here
+__global__ void short_path_update_atomic(short* graph, short* dist, unsigned char* sptSet, int* u, int V){
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int min_g = unpackIdx(global_min);
+    short min_v = (short)unpackVal(global_min);
+    
+    if(min_g == -1){
+        //printf("Error -1\r\n");
+    }
+    if(tid<V){
+        dist[tid] = (short)min(((int)dist[min_g] + (int)graph[min_g*V+tid])+(int)(graph[min_g*V+tid] == 0)*(int)dist[tid], (int)dist[tid]);
+        //printf("dist[%d]= %hu\r\n",tid ,dist[tid]);
+    }
+    if(tid == 0){
+    //only one thread, the first for convenience update the visited node and re-initilize the global minimum
+    //printf("min val: %hu, index:%hu\r\n", min_v, min_g);
+    __threadfence();
+    sptSet[min_g] = 1;
+    //atomicExch(&global_min, packMin(0x7FFFFFFF, -1));
+    __threadfence();
+    }
+}
+
+auto checkCuda = [](const char* tag){
+    cudaError_t e = cudaGetLastError();
+    if (e != cudaSuccess) {
+        fprintf(stderr, "CUDA error (%s): %s\n", tag, cudaGetErrorString(e));
+        exit(1);
+    }
+};
+
+void dijkstra_parallelize_shared_atomic(short* graph, int src, short* dist)
+{   
+    short *graph_d, *dist_d;
+    unsigned char  *sptSet_d;
+    int   *node_u;
+    
+    cudaMalloc(&graph_d,  VERTEX*VERTEX*sizeof(short));
+    cudaMalloc(&dist_d,   VERTEX*sizeof(short));
+    cudaMalloc(&sptSet_d, VERTEX*sizeof(unsigned char));
+
+    int numBlocks = (VERTEX + BLOCK_DIM - 1) / BLOCK_DIM;
+    cudaMalloc(&node_u, sizeof(int));
+
+    cudaMemcpy(graph_d, graph, VERTEX*VERTEX*sizeof(short), cudaMemcpyHostToDevice);
+
+    // init host
+    for (int i=0;i<VERTEX;i++) 
+    dist[i] = (short)0x7FFF;
+    dist[src] = 0;
+    
+
+    // init device
+    cudaMemcpy(dist_d, dist, VERTEX*sizeof(short), cudaMemcpyHostToDevice);
+    cudaMemset(sptSet_d, 0, VERTEX*sizeof(unsigned char)); // set all false
+
+    dim3 block(BLOCK_DIM,1,1);
+    dim3 grid(numBlocks,1,1);
+    unsigned long long init = (((unsigned long long)(unsigned int)0x7FFFFFFF) << 32) | (unsigned int)-1;
+
+    for (int it = 0; it < VERTEX - 1; it++) {
+        //printf("V: %d\r\n", it);
+        
+        cudaMemcpyToSymbol(global_min, &init, sizeof(init));
+        checkCuda("memCpy to symbol reset");
+        fusedMinKernel<<<grid, block>>>(dist_d, sptSet_d, VERTEX, node_u);
+        checkCuda("launch fudes kernel");
+        cudaDeviceSynchronize();
+
+        short_path_update_atomic<<<grid, block>>>(graph_d, dist_d, sptSet_d, node_u, VERTEX);
+        checkCuda("Launch relax node");
+        cudaDeviceSynchronize();
+    }
+
+    cudaMemcpy(dist, dist_d, VERTEX*sizeof(short), cudaMemcpyDeviceToHost);
+    cudaFree(graph_d); cudaFree(dist_d); cudaFree(sptSet_d);
+    cudaFree(node_u);
 }
 
 
