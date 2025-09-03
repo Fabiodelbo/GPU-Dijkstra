@@ -325,13 +325,14 @@ __global__ void fusedMinKernel(short* dist, unsigned char* sptSet, int V, int* n
 __global__ void short_path_update_atomic(short* graph, short* dist, unsigned char* sptSet, int* u, int V){
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int min_g = unpackIdx(global_min);
-    short min_v = (short)unpackVal(global_min);
+    short dist_c = dist[tid];
+    short graph_elem = graph[min_g*V+tid];
     
     if(min_g == -1){
         //printf("Error -1\r\n");
     }
     if(tid<V){
-        dist[tid] = (short)min(((int)dist[min_g] + (int)graph[min_g*V+tid])+(int)(graph[min_g*V+tid] == 0)*(int)dist[tid], (int)dist[tid]);
+        dist[tid] = (short)min(((int)dist[min_g] + (int)graph_elem)+(int)(graph_elem == 0)*(int)dist_c, (int)dist_c);
         //printf("dist[%d]= %hu\r\n",tid ,dist[tid]);
     }
     if(tid == 0){

@@ -53,8 +53,11 @@ int main()
     
     diff_cpu = std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu);
     diff_gpu = std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu);
-    std::cout<<"Time duration CPU function: "<<diff_cpu.count()<<" ms"<<std::endl;
-    std::cout<<"Time duration GPU kernel: "<<diff_gpu.count()<<" ms"<<std::endl;
+    float time_cpu = diff_cpu.count();
+    float time_gpu = diff_gpu.count();
+    std::cout<<"Time duration CPU function: "<<time_cpu<<" ms"<<std::endl;
+    std::cout<<"Time duration GPU kernel: "<<time_gpu<<" ms"<<std::endl;
+    std::cout<<"speed up: "<<(float)100-(float)(100/time_cpu*time_gpu)<<" %"<<std::endl;
 
     return 0;
 }
@@ -64,7 +67,7 @@ void graph_generator(short* graph, int vertex){
     for(int i = 0; i<vertex; i++){
         for(int j = i; j<vertex; j++){
             /*filling matrix with random value and leaving diagonal at 0 because is the distance between a vertex and itself*/
-            graph[i*VERTEX+j] = graph[j*VERTEX+i] = (i!=j)*(rand()%VERTEX+1);
+            graph[i*VERTEX+j] = graph[j*VERTEX+i] = (i!=j)*(rand()%VERTEX+1)*(rand()%2);
             }
             
     }
@@ -110,12 +113,8 @@ void dijkstra(short* graph, int src, short* dist)
         // picked vertex.
         for (int v = 0; v < VERTEX; v++){
             /*updating min distance in order to not create warp divergence*/
-            dist[v] = std::min<short>((short)(dist[u] + graph[u*VERTEX+v])+(graph[u*VERTEX+v] == 0)*dist[v], dist[v]);
+            dist[v] = (short)std::min(((int)dist[u] + (int)graph[u*VERTEX+v])+(graph[u*VERTEX+v] == 0)*(int)dist[v], (int)dist[v]);
         }
-        /*printf("dist: ");
-        for (int v = 0; v < V; v++)
-            printf("%hu, ",dist[v]);
-        printf("\r\n");*/
     }
 }
 
