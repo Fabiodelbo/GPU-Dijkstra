@@ -107,6 +107,7 @@ int main(int argc, char** argv)
                 CRS_to_dense(gen_graph, G);
                 DeltaStepping ds(G, delta);
 
+<<<<<<< HEAD
                 dijkstra_parallelize_shared_atomic(gen_graph, 0, dist_gpu);
                 // Δ-stepping
                 ds.run(0);
@@ -121,6 +122,26 @@ int main(int argc, char** argv)
         break;
     }
     
+=======
+    start_gpu = std::chrono::high_resolution_clock::now();
+    //dijkstra_parallelize_naive(gen_graph, 0, dist_gpu, VERTEX);
+    //dijkstra_parallelize_shared(gen_graph, 0, dist_gpu);
+    dijkstra_parallelize_shared_atomic(gen_graph, 0, dist_gpu);
+    end_gpu = std::chrono::high_resolution_clock::now();
+
+
+    //printSolution(dist_gpu, VERTEX);
+
+    compare_dist(dist_cpu, dist_gpu);
+    
+    diff_cpu = std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu);
+    diff_gpu = std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu);
+    float time_cpu = diff_cpu.count();
+    float time_gpu = diff_gpu.count();
+    std::cout<<"Time duration CPU function: "<<time_cpu<<" ms"<<std::endl;
+    std::cout<<"Time duration GPU kernel: "<<time_gpu<<" ms"<<std::endl;
+    std::cout<<"speed up: "<<(float)100-(float)(100/time_cpu*time_gpu)<<" %"<<std::endl;
+>>>>>>> 798d618 (deleting bin file and updating .gitignore)
 
     return 0;
 }
@@ -130,7 +151,11 @@ void graph_generator(short* graph, int vertex){
     for(int i = 0; i<vertex; i++){
         for(int j = i; j<vertex; j++){
             /*filling matrix with random value and leaving diagonal at 0 because is the distance between a vertex and itself*/
+<<<<<<< HEAD
             graph[i*VERTEX+j] = graph[j*VERTEX+i] = (i!=j)*(rand()%VERTEX+1)*(rand()%100 <= 5);
+=======
+            graph[i*VERTEX+j] = graph[j*VERTEX+i] = (i!=j)*(rand()%VERTEX+1)*(rand()%2);
+>>>>>>> 798d618 (deleting bin file and updating .gitignore)
             }
     }
 }

@@ -16,12 +16,12 @@
 using namespace std;
 
 struct CSRGraph {
-    size_t n;                     // nodi
-    size_t m;                     // archi (nnz)
+    size_t n;                     // vertex
+    size_t m;                     // edges (nnz)
     //size_t in order to avoid overflow for large graphs
     vector<size_t> row_ptr;       // size n+1
     vector<int> col_ind;          // size m
-    vector<int> weights;          // size m (interi per semplicità)
+    vector<int> weights;          // size m
 
     CSRGraph(size_t n_, size_t avg_deg, unsigned seed = 42)
         : n(n_), m(n_ * avg_deg),
@@ -82,7 +82,7 @@ public:
     size_t m;
     int delta;
     CSRGraph const& G;
-    vector<int> tent;                 // distanze provvisorie
+    vector<int> tent;                 // tentative distances
     vector<vector<int>> B;            // bucket array
 
     DeltaStepping(CSRGraph const& G_, int delta_)
@@ -126,7 +126,7 @@ public:
             // heavy nodes set
             vector<int> S;
 
-            // fase sugli archi leggeri
+            // light edges phase
             while (!B[i].empty()) {
                 vector<pair<int,int>> Req;
                 // iterate local copy to avoid issues if bucket changes
@@ -154,73 +154,7 @@ public:
                 for (auto &p : Req) relax(p.first, p.second);
             }
 
-            // fase sugli archi pesanti
-            vector<pair<int,int>> ReqHeavy;
-            for (int u : S) {
-                if (u < 0 || (size_t)u >= n) continue;
-                size_t start = G.row_ptr[u];
-                size_t end = G.row_ptr[u+1];
-                for (size_t j = start; j < end; ++j) {
-                    int v = G.col_ind[j];
-                    int w = G.weights[j];
-                    if (w > delta) {
-                        if (tent[u] != INF) 
-                            ReqHeavy.emplace_back(v, tent[u] + w);
-                    }
-                }
-            }
-            for (auto &p : ReqHeavy) relax(p.first, p.second);
-
-            ++i;
-        }
-    }
-
-    void run_split_before(int source) {
-        if (source < 0 || (size_t)source >= n) {
-            cerr << "source out of range\n";
-            return;
-        }
-        tent.assign(n, INF);
-        for (auto &b : B) b.clear();
-
-        tent[source] = 0;
-        B[0].push_back(source);
-
-        size_t i = 0;
-        while (i < n) {
-            if (B[i].empty()) { ++i; continue; }
-
-            // heavy nodes set
-            vector<int> S;
-
-            // fase sugli archi leggeri
-            while (!B[i].empty()) {
-                vector<pair<int,int>> Req;
-                // iterate local copy to avoid issues if bucket changes
-                vector<int> bucket_copy = B[i];
-                for (int u : bucket_copy) {
-                    if (u < 0 || (size_t)u >= n) continue;
-                    //printf("Total edgs for node %d: %zu\n", u, G.row_ptr[u+1]-G.row_ptr[u]);
-                    size_t start = G.row_ptr[u];
-                    size_t end = G.row_ptr[u+1];
-                    for (size_t j = start; j < end; ++j) {
-                        int v = G.col_ind[j];
-                        int w = G.weights[j];
-                        if (w <= delta) {
-                            // tent[u] should be valid
-                            if (tent[u] != INF) 
-                                Req.emplace_back(v, tent[u] + w);
-                        }
-                    }
-                }
-                // append S and clear bucket i
-                S.insert(S.end(), B[i].begin(), B[i].end());
-                B[i].clear();
-
-                for (auto &p : Req) relax(p.first, p.second);
-            }
-
-            // fase sugli archi pesanti
+            // heavy edges phase
             vector<pair<int,int>> ReqHeavy;
             for (int u : S) {
                 if (u < 0 || (size_t)u >= n) continue;
