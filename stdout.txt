@@ -1,3 +1,0 @@
-Result are equal!
-Time duration CPU function: 10444 ms
-Time duration GPU kernel: 5031 ms

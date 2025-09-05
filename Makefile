@@ -87,6 +87,12 @@ clean:
 	$(RM) -r bin/ *.txt
 
 
-run:
-	./${EXE} > stdout.txt 2> stderr.txt
+run-d:
+	./${EXE} 0 > stdout.txt 2> stderr.txt
+
+run-a:
+	./${EXE} 1 > stdout.txt 2> stderr.txt
+
+run-both:
+	./${EXE} 2 > stdout.txt 2> stderr.txt
 

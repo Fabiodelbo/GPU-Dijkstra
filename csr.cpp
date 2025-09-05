@@ -1,0 +1,290 @@
+// Include C++ header files.
+#include <iostream>
+
+// Include local CUDA header files.
+#include "include/cuda_kernel.cuh"
+#include <limits.h>
+#include <stdio.h>
+#include <algorithm>
+#include <random>
+#include <time.h>
+#include <chrono>
+
+#include <vector>
+#include <set>
+
+using namespace std;
+
+struct CSRGraph {
+    size_t n;                     // nodi
+    size_t m;                     // archi (nnz)
+    //size_t in order to avoid overflow for large graphs
+    vector<size_t> row_ptr;       // size n+1
+    vector<int> col_ind;          // size m
+    vector<int> weights;          // size m (interi per semplicità)
+
+    CSRGraph(size_t n_, size_t avg_deg, unsigned seed = 42)
+        : n(n_), m(n_ * avg_deg),
+          row_ptr(n_ + 1, 0),
+          col_ind(m),
+          weights(m)
+    {}
+    
+    void CSR_generate(){
+        mt19937 rng(time(NULL));
+        //set reange of random destination node and weight
+        uniform_int_distribution<int> dist_node(0, int(n)-1);
+        uniform_int_distribution<int> dist_weight(1, 10);
+
+        size_t idx = 0;
+        for (size_t u = 0; u < n; ++u) {
+            for (size_t j = 0; j < (m/n); ++j) {
+                if (idx >= m) {
+                    cerr << "Error: idx >= m\n";
+                    exit(EXIT_FAILURE);
+                }
+                col_ind[idx] = dist_node(rng);
+                weights[idx] = dist_weight(rng);
+                ++idx;
+            }
+            row_ptr[u + 1] = idx;
+        }
+        // sanity checks
+        if (idx != m) {
+            cerr << "Warning: generated edges (" << idx << ") != m (" << m << ")\n";
+            m = idx;
+            col_ind.resize(m);
+            weights.resize(m);
+        }
+    }
+    void print_CSR(){
+        printf("row_ptr: ");
+        for(size_t i = 0; i<row_ptr.size(); i++){
+            printf("%zu ", row_ptr[i]);
+        }
+        printf("\ncol_ind: ");
+        for(size_t i = 0; i<col_ind.size(); i++){
+            printf("%d ", col_ind[i]);
+        }
+        printf("\nweights: ");
+        for(size_t i = 0; i<weights.size(); i++){
+            printf("%d ", weights[i]);
+        }
+        printf("\n");
+    }
+};
+
+const int INF = 1e9;
+
+class DeltaStepping {
+public:
+    size_t n;
+    size_t m;
+    int delta;
+    CSRGraph const& G;
+    vector<int> tent;                 // distanze provvisorie
+    vector<vector<int>> B;            // bucket array
+
+    DeltaStepping(CSRGraph const& G_, int delta_)
+        : n(G_.n), m(G_.m), delta(delta_), G(G_), tent(G_.n, INF), B(G_.n) {}
+
+    void relax(int v, int x) {
+        if ((size_t)v >= n) return; // guard
+        if (x < tent[v]) {
+            // if already in a bucket, remove
+            if (tent[v] != INF) {
+                int oldBucket = tent[v] / delta;
+                if (oldBucket >= 0 && (size_t)oldBucket < B.size()) {
+                    auto &bucket = B[oldBucket];
+                    bucket.erase(remove(bucket.begin(), bucket.end(), v), bucket.end());
+                }
+            }
+            // insert in the new correct bucket
+            tent[v] = x;
+            int newBucket = x / delta;
+            if (newBucket >= 0 && (size_t)newBucket < B.size()) {
+                B[newBucket].push_back(v);
+            }
+        }
+    }
+
+    void run(int source) {
+        if (source < 0 || (size_t)source >= n) {
+            cerr << "source out of range\n";
+            return;
+        }
+        tent.assign(n, INF);
+        for (auto &b : B) b.clear();
+
+        tent[source] = 0;
+        B[0].push_back(source);
+
+        size_t i = 0;
+        while (i < n) {
+            if (B[i].empty()) { ++i; continue; }
+
+            // heavy nodes set
+            vector<int> S;
+
+            // fase sugli archi leggeri
+            while (!B[i].empty()) {
+                vector<pair<int,int>> Req;
+                // iterate local copy to avoid issues if bucket changes
+                vector<int> bucket_copy = B[i];
+                for (int u : bucket_copy) {
+                    if (u < 0 || (size_t)u >= n) continue;
+                    //printf("Total edgs for node %d: %zu\n", u, G.row_ptr[u+1]-G.row_ptr[u]);
+                    size_t start = G.row_ptr[u];
+                    size_t end = G.row_ptr[u+1];
+                    //get all the edges for node u
+                    for (size_t j = start; j < end; ++j) {
+                        int v = G.col_ind[j];
+                        int w = G.weights[j];
+                        if (w <= delta) {
+                            // if node u has been reached so we can relax its edges
+                            if (tent[u] != INF) 
+                                Req.emplace_back(v, tent[u] + w);
+                        }
+                    }
+                }
+                // append S and clear bucket i
+                S.insert(S.end(), B[i].begin(), B[i].end());
+                B[i].clear();
+
+                for (auto &p : Req) relax(p.first, p.second);
+            }
+
+            // fase sugli archi pesanti
+            vector<pair<int,int>> ReqHeavy;
+            for (int u : S) {
+                if (u < 0 || (size_t)u >= n) continue;
+                size_t start = G.row_ptr[u];
+                size_t end = G.row_ptr[u+1];
+                for (size_t j = start; j < end; ++j) {
+                    int v = G.col_ind[j];
+                    int w = G.weights[j];
+                    if (w > delta) {
+                        if (tent[u] != INF) 
+                            ReqHeavy.emplace_back(v, tent[u] + w);
+                    }
+                }
+            }
+            for (auto &p : ReqHeavy) relax(p.first, p.second);
+
+            ++i;
+        }
+    }
+
+    void run_split_before(int source) {
+        if (source < 0 || (size_t)source >= n) {
+            cerr << "source out of range\n";
+            return;
+        }
+        tent.assign(n, INF);
+        for (auto &b : B) b.clear();
+
+        tent[source] = 0;
+        B[0].push_back(source);
+
+        size_t i = 0;
+        while (i < n) {
+            if (B[i].empty()) { ++i; continue; }
+
+            // heavy nodes set
+            vector<int> S;
+
+            // fase sugli archi leggeri
+            while (!B[i].empty()) {
+                vector<pair<int,int>> Req;
+                // iterate local copy to avoid issues if bucket changes
+                vector<int> bucket_copy = B[i];
+                for (int u : bucket_copy) {
+                    if (u < 0 || (size_t)u >= n) continue;
+                    //printf("Total edgs for node %d: %zu\n", u, G.row_ptr[u+1]-G.row_ptr[u]);
+                    size_t start = G.row_ptr[u];
+                    size_t end = G.row_ptr[u+1];
+                    for (size_t j = start; j < end; ++j) {
+                        int v = G.col_ind[j];
+                        int w = G.weights[j];
+                        if (w <= delta) {
+                            // tent[u] should be valid
+                            if (tent[u] != INF) 
+                                Req.emplace_back(v, tent[u] + w);
+                        }
+                    }
+                }
+                // append S and clear bucket i
+                S.insert(S.end(), B[i].begin(), B[i].end());
+                B[i].clear();
+
+                for (auto &p : Req) relax(p.first, p.second);
+            }
+
+            // fase sugli archi pesanti
+            vector<pair<int,int>> ReqHeavy;
+            for (int u : S) {
+                if (u < 0 || (size_t)u >= n) continue;
+                size_t start = G.row_ptr[u];
+                size_t end = G.row_ptr[u+1];
+                for (size_t j = start; j < end; ++j) {
+                    int v = G.col_ind[j];
+                    int w = G.weights[j];
+                    if (w > delta) {
+                        if (tent[u] != INF) 
+                            ReqHeavy.emplace_back(v, tent[u] + w);
+                    }
+                }
+            }
+            for (auto &p : ReqHeavy) relax(p.first, p.second);
+
+            ++i;
+        }
+    }
+};
+
+void CRS_to_dense(short* graph, CSRGraph G){
+    //inizializzo la matrice a 0
+    for(int i = 0; i<VERTEX; i++){
+        for(int j = 0; j<VERTEX; j++){
+            graph[i*VERTEX+j] = 0;
+        }
+    }
+    for(int i = 0; i<G.n; i++){
+        for(int j = G.row_ptr[i]; j<G.row_ptr[i+1]; j++){
+            if(graph[i*VERTEX+G.col_ind[j]] == 0)
+                graph[i*VERTEX+G.col_ind[j]]  = G.weights[j];
+            else if(graph[i*VERTEX+G.col_ind[j]] > G.weights[j])
+                graph[i*VERTEX+G.col_ind[j]]  = G.weights[j];
+            //else keep the minimum weight
+            
+        }
+    }
+
+    // for(int i = 0; i<VERTEX; i++){
+    //     for(int j = 0; j<VERTEX; j++){
+    //         printf("%d ", graph[i*VERTEX+j]);
+    //     }
+    //     printf("\n");
+    // }
+}
+
+void dense_to_CSR(short* graph, CSRGraph &G){
+    int idx = 0;
+    G.row_ptr[0] = 0;
+    for(int i = 0; i<G.n; i++){
+        for(int j = 0; j<G.n; j++){
+            if(graph[i*VERTEX+j] != 0){
+                G.col_ind[idx] = j;
+                G.weights[idx] = graph[i*VERTEX+j];
+                idx++;
+            }
+        }
+        G.row_ptr[i+1] = idx;
+    }
+    if(idx != G.m){
+        printf("Warning: generated edges (%d) != m (%zu)\n", idx, G.m);
+        G.m = idx;
+        G.col_ind.resize(G.m);
+        G.weights.resize(G.m);
+    }
+}
