@@ -309,21 +309,10 @@ __global__ void fusedMinKernel(short* dist, unsigned char* sptSet, int V, int* n
 
     // thread 0 of each block check if the shared minimal of the block is lower than global minimal
     if (tid == 0) {
-<<<<<<< HEAD
         // checks and set global minimal
 
         unsigned long long pack = packMin((int)localMinVal[0], localMinIdx[0]);
         unsigned long long old = atomicMin(&global_min, pack);
-=======
-        //int val = (int)localMinVal[0];
-        //int idx   = localMinIdx[0];
-
-        // checks and set global minimal
-        //printf("%hu, %d\r\n",localMinVal[0],(int)localMinVal[0]);
-        unsigned long long pack = packMin((int)localMinVal[0], localMinIdx[0]);
-        unsigned long long old = atomicMin(&global_min, pack);
-        //printf("block: %d, Local min index: %d, Val:% hu \r\n", blockIdx.x, localMinIdx[0], localMinVal[0]);
->>>>>>> 798d618 (deleting bin file and updating .gitignore)
     }
 }
 
@@ -339,22 +328,11 @@ __global__ void short_path_update_atomic(short* graph, short* dist, unsigned cha
     }
     if(tid<V){
         dist[tid] = (short)min(((int)dist[min_g] + (int)graph_elem)+(int)(graph_elem == 0)*(int)dist_c, (int)dist_c);
-<<<<<<< HEAD
     }
     if(tid == 0){
     //only one thread, the first for convenience update the visited node and re-initilize the global minimum
     __threadfence();
     sptSet[min_g] = 1;
-=======
-        //printf("dist[%d]= %hu\r\n",tid ,dist[tid]);
-    }
-    if(tid == 0){
-    //only one thread, the first for convenience update the visited node and re-initilize the global minimum
-    //printf("min val: %hu, index:%hu\r\n", min_v, min_g);
-    __threadfence();
-    sptSet[min_g] = 1;
-    //atomicExch(&global_min, packMin(0x7FFFFFFF, -1));
->>>>>>> 798d618 (deleting bin file and updating .gitignore)
     __threadfence();
     }
 }
