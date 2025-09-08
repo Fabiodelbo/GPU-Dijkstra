@@ -78,10 +78,10 @@ const int INF = 1e9;
 
 class DeltaStepping {
 public:
-    size_t n;
-    size_t m;
+    size_t n;                         // vertex
+    size_t m;                         // edges
     int delta;
-    CSRGraph const& G;
+    CSRGraph const& G;                // graph
     vector<int> tent;                 // tentative distances
     vector<vector<int>> B;            // bucket array
 

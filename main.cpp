@@ -21,6 +21,7 @@ void dijkstra(short* graph, int src, short* dist);
 void graph_generator(short* graph, int vertex);
 void compare_dist(short *dist_cpu, short *dist_gpu);
 void compare_dist_tent(vector<int> dist_cpu, short *dist_gpu);
+void compare_dist_csr(vector<int> dist_cpu, int *dist_gpu);
 
 
 // driver program to test above function
@@ -114,6 +115,43 @@ int main(int argc, char** argv)
                 free(dist_gpu), free(gen_graph);
         }
         break;
+        case 3:{
+            //G.print_CSR();
+            int *gen_graph = (int *)malloc(VERTEX*VERTEX*sizeof(int*));
+            int *dist_gpu = (int *)malloc(VERTEX*sizeof(int*));
+            size_t *row_ptr = &G.row_ptr[0];
+            int *col_ind = &G.col_ind[0];
+            int *weights = &G.weights[0];
+
+            std::chrono::high_resolution_clock::time_point start_cpu, end_cpu, start_gpu, end_gpu;
+            std::chrono::milliseconds diff_cpu, diff_gpu;
+
+            start_cpu = std::chrono::high_resolution_clock::now();
+            delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
+            end_cpu = std::chrono::high_resolution_clock::now();
+            printf("DeltaStepping GPU end:\n");
+            start_gpu = std::chrono::high_resolution_clock::now();
+            ds.run(0);
+            end_gpu = std::chrono::high_resolution_clock::now();
+            printf("DeltaStepping CPU end:\n");
+            // print distances (example)
+            // for (int i = 0; i < VERTEX; ++i) {
+            //     printf("dist[%d] = %d\n", i, dist_gpu[i]==INF? -1 : dist_gpu[i]);
+            // }
+            compare_dist_csr(ds.tent, dist_gpu);
+
+            diff_cpu = std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu);
+            diff_gpu = std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu);
+            float time_cpu = diff_cpu.count();
+            float time_gpu = diff_gpu.count();
+            std::cout<<"Time duration CPU function: "<<time_cpu<<" ms"<<std::endl;
+            std::cout<<"Time duration GPU kernel: "<<time_gpu<<" ms"<<std::endl;
+            std::cout<<"speed up: "<<(float)100-(float)(100/time_cpu*time_gpu)<<" %"<<std::endl;
+
+            free(dist_gpu), free(gen_graph);
+
+        }
+        break;
         default : {
                 printf("Error algorithm code not correct");
                 exit(EXIT_FAILURE);
@@ -185,6 +223,18 @@ void compare_dist(short *dist_cpu, short *dist_gpu){
 }
 
 void compare_dist_tent(vector<int> dist_cpu, short *dist_gpu){
+    bool equal = 1;
+    for(int i = 0; i<VERTEX; i++){
+        if(dist_cpu[i] != dist_gpu[i]){
+            printf("dist_tent[%d] != dist_gpu[%d] (%hu != %hu)\r\n",i,i,dist_cpu[i], dist_gpu[i] );
+            equal = 0;
+        }
+    }
+    if(equal)
+        printf("Result are equal!\r\n");
+}
+
+void compare_dist_csr(vector<int> dist_cpu, int *dist_gpu){
     bool equal = 1;
     for(int i = 0; i<VERTEX; i++){
         if(dist_cpu[i] != dist_gpu[i]){

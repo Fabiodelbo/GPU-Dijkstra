@@ -2,8 +2,8 @@
 
 // Number of vertices in the graph
 //35000 nodes are 4.56 GB of memory
-#define VERTEX 30000
-#define AVG_DEG 10000
+#define VERTEX 50000
+#define AVG_DEG 1000
 #define DELTA (AVG_DEG/2)//for delta-stepping
 
 #define BLOCK_DIM 512
@@ -14,7 +14,4 @@ void dijkstra_parallelize_naive(short* graph, int src, short* dist, int V);
 void dijkstra_parallelize_shared(short* graph, int src, short* dist);
 void dijkstra_parallelize_shared_atomic(short* graph, int src, short* dist);
 int minDistance(short dist[], bool sptSet[], int V);
-
-
-
-
+void delta_stepping_gpu_device_buckets(int n, int m, const size_t* h_row_ptr, const int* h_col_ind, const int* h_weights, int source, int delta, int* dist_h);

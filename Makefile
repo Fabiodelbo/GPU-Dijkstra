@@ -96,3 +96,6 @@ run-a:
 run-both:
 	./${EXE} 2 > stdout.txt 2> stderr.txt
 
+run-delta-naive:
+	./${EXE} 3 > stdout.txt 2> stderr.txt
+

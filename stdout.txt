@@ -1,0 +1,10 @@
+algo is: 3DeltaStepping fields:
+delta: 500
+graph vertices: 50000
+graph edges: 50000000
+DeltaStepping GPU end:
+DeltaStepping CPU end:
+Result are equal!
+Time duration CPU function: 752 ms
+Time duration GPU kernel: 84465 ms
+speed up: -11132 %
