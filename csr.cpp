@@ -32,9 +32,10 @@ struct CSRGraph {
     
     void CSR_generate(){
         mt19937 rng(time(NULL));
+        //mt19937 rng(1024);
         //set reange of random destination node and weight
         uniform_int_distribution<int> dist_node(0, int(n)-1);
-        uniform_int_distribution<int> dist_weight(1, 10);
+        uniform_int_distribution<int> dist_weight(1, 100);
 
         size_t idx = 0;
         for (size_t u = 0; u < n; ++u) {
@@ -74,7 +75,7 @@ struct CSRGraph {
     }
 };
 
-const int INF = 1e9;
+constexpr int INF = 0x3f3f3f3f;
 
 class DeltaStepping {
 public:
@@ -86,10 +87,11 @@ public:
     vector<vector<int>> B;            // bucket array
 
     DeltaStepping(CSRGraph const& G_, int delta_)
-        : n(G_.n), m(G_.m), delta(delta_), G(G_), tent(G_.n, INF), B(G_.n) {}
+        : n(G_.n), m(G_.m), delta(delta_), G(G_), tent(G_.n, INF), B(G_.m) {}
 
     void relax(int v, int x) {
         if ((size_t)v >= n) return; // guard
+        printf("%d ", v);
         if (x < tent[v]) {
             // if already in a bucket, remove
             if (tent[v] != INF) {
@@ -127,7 +129,9 @@ public:
             vector<int> S;
 
             // light edges phase
+            
             while (!B[i].empty()) {
+                printf("bucket %d: ", i);
                 vector<pair<int,int>> Req;
                 // iterate local copy to avoid issues if bucket changes
                 vector<int> bucket_copy = B[i];
@@ -144,6 +148,7 @@ public:
                             // if node u has been reached so we can relax its edges
                             if (tent[u] != INF) 
                                 Req.emplace_back(v, tent[u] + w);
+                                
                         }
                     }
                 }
@@ -153,6 +158,7 @@ public:
 
                 for (auto &p : Req) relax(p.first, p.second);
             }
+            
 
             // heavy edges phase
             vector<pair<int,int>> ReqHeavy;
@@ -171,6 +177,7 @@ public:
             }
             for (auto &p : ReqHeavy) relax(p.first, p.second);
 
+            printf(" \r\n");
             ++i;
         }
     }

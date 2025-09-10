@@ -90,10 +90,19 @@ int main(int argc, char** argv)
         case 1:{
                 // Δ-stepping cpu
                 //G.print_CSR();
+                std::chrono::high_resolution_clock::time_point start_cpu, end_cpu, start_gpu, end_gpu;
+                std::chrono::milliseconds diff_cpu, diff_gpu;
+
+                start_cpu = std::chrono::high_resolution_clock::now();
                 ds.run(0);
-                for (size_t i = 0; i < G.n; ++i) {
+                end_cpu = std::chrono::high_resolution_clock::now();
+
+                diff_cpu = std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu);
+                float time_cpu = diff_cpu.count();
+                std::cout<<"Time duration CPU function: "<<time_cpu<<" ms"<<std::endl;
+                /*for (size_t i = 0; i < G.n; ++i) {
                     cout << "dist["<<i<<"] = " << ds.tent[i] << "\n";
-                }
+                }*/
         }
         break;
         case 2:{// Δ-stepping cpu && dijkstra parallel
@@ -116,8 +125,6 @@ int main(int argc, char** argv)
         }
         break;
         case 3:{
-            //G.print_CSR();
-            int *gen_graph = (int *)malloc(VERTEX*VERTEX*sizeof(int*));
             int *dist_gpu = (int *)malloc(VERTEX*sizeof(int*));
             size_t *row_ptr = &G.row_ptr[0];
             int *col_ind = &G.col_ind[0];
@@ -125,14 +132,17 @@ int main(int argc, char** argv)
 
             std::chrono::high_resolution_clock::time_point start_cpu, end_cpu, start_gpu, end_gpu;
             std::chrono::milliseconds diff_cpu, diff_gpu;
+            //G.print_CSR();
 
-            start_cpu = std::chrono::high_resolution_clock::now();
-            delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
-            end_cpu = std::chrono::high_resolution_clock::now();
-            printf("DeltaStepping GPU end:\n");
             start_gpu = std::chrono::high_resolution_clock::now();
-            ds.run(0);
+            //delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
+            delta_stepping_gpu_shared(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
+            //delta_stepping_gpu_persistent_full(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
             end_gpu = std::chrono::high_resolution_clock::now();
+            printf("DeltaStepping GPU end:\n");
+            start_cpu = std::chrono::high_resolution_clock::now();
+            ds.run(0);
+            end_cpu = std::chrono::high_resolution_clock::now();
             printf("DeltaStepping CPU end:\n");
             // print distances (example)
             // for (int i = 0; i < VERTEX; ++i) {
@@ -148,7 +158,7 @@ int main(int argc, char** argv)
             std::cout<<"Time duration GPU kernel: "<<time_gpu<<" ms"<<std::endl;
             std::cout<<"speed up: "<<(float)100-(float)(100/time_cpu*time_gpu)<<" %"<<std::endl;
 
-            free(dist_gpu), free(gen_graph);
+            free(dist_gpu);
 
         }
         break;
