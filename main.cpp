@@ -135,8 +135,8 @@ int main(int argc, char** argv)
             //G.print_CSR();
 
             start_gpu = std::chrono::high_resolution_clock::now();
-            //delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
-            delta_stepping_gpu_shared(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
+            delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
+            //delta_stepping_gpu_shared(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
             //delta_stepping_gpu_persistent_full(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
             end_gpu = std::chrono::high_resolution_clock::now();
             printf("DeltaStepping GPU end:\n");

@@ -89,23 +89,29 @@ public:
     DeltaStepping(CSRGraph const& G_, int delta_)
         : n(G_.n), m(G_.m), delta(delta_), G(G_), tent(G_.n, INF), B(G_.m) {}
 
-    void relax(int v, int x) {
+    void relax(int v, int x, int currentBucket) {
         if ((size_t)v >= n) return; // guard
-        printf("%d ", v);
+        //printf("%d ", v);
         if (x < tent[v]) {
             // if already in a bucket, remove
             if (tent[v] != INF) {
                 int oldBucket = tent[v] / delta;
+                int newBucket = x / delta;
+                //printf("moving %d from bucket %d to %d\n", v, oldBucket, newBucket);
                 if (oldBucket >= 0 && (size_t)oldBucket < B.size()) {
                     auto &bucket = B[oldBucket];
                     bucket.erase(remove(bucket.begin(), bucket.end(), v), bucket.end());
                 }
             }
             // insert in the new correct bucket
+            
             tent[v] = x;
             int newBucket = x / delta;
+            // if(newBucket == currentBucket)
+            //         printf(" + %d", v);
             if (newBucket >= 0 && (size_t)newBucket < B.size()) {
                 B[newBucket].push_back(v);
+                //printf("%d ", v);
             }
         }
     }
@@ -131,11 +137,12 @@ public:
             // light edges phase
             
             while (!B[i].empty()) {
-                printf("bucket %d: ", i);
+                //printf("\n bucket %d: ", i);
                 vector<pair<int,int>> Req;
                 // iterate local copy to avoid issues if bucket changes
                 vector<int> bucket_copy = B[i];
                 for (int u : bucket_copy) {
+                    //printf("%d ", u);
                     if (u < 0 || (size_t)u >= n) continue;
                     //printf("Total edgs for node %d: %zu\n", u, G.row_ptr[u+1]-G.row_ptr[u]);
                     size_t start = G.row_ptr[u];
@@ -146,17 +153,24 @@ public:
                         int w = G.weights[j];
                         if (w <= delta) {
                             // if node u has been reached so we can relax its edges
+                            //printf(" -> %d ",v);
                             if (tent[u] != INF) 
                                 Req.emplace_back(v, tent[u] + w);
                                 
                         }
                     }
+                    //printf(" | ");
                 }
                 // append S and clear bucket i
                 S.insert(S.end(), B[i].begin(), B[i].end());
                 B[i].clear();
+                //printf("Bucket %d: ", i);
+                for (auto &p : Req) relax(p.first, p.second, i);
+                //printf("\n");
 
-                for (auto &p : Req) relax(p.first, p.second);
+                // for (int i = 0; i < n; ++i) {
+                // printf("dist[%d] = %d - ", i, tent[i] == INF ? -1 : tent[i]);
+                // }
             }
             
 
@@ -175,9 +189,10 @@ public:
                     }
                 }
             }
-            for (auto &p : ReqHeavy) relax(p.first, p.second);
+            //printf("Heavy relax: ");   
+            for (auto &p : ReqHeavy) relax(p.first, p.second, i);
 
-            printf(" \r\n");
+            //printf(" \r\n");
             ++i;
         }
     }
