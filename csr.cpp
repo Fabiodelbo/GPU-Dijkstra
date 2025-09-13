@@ -13,6 +13,8 @@
 #include <vector>
 #include <set>
 
+//#define PRINT
+
 using namespace std;
 
 struct CSRGraph {
@@ -31,8 +33,8 @@ struct CSRGraph {
     {}
     
     void CSR_generate(){
-        mt19937 rng(time(NULL));
-        //mt19937 rng(1024);
+        //mt19937 rng(time(NULL));
+        mt19937 rng(2024);
         //set reange of random destination node and weight
         uniform_int_distribution<int> dist_node(0, int(n)-1);
         uniform_int_distribution<int> dist_weight(1, 100);
@@ -107,8 +109,10 @@ public:
             
             tent[v] = x;
             int newBucket = x / delta;
-            // if(newBucket == currentBucket)
-            //         printf(" + %d", v);
+            #ifdef PRINT
+            if(newBucket == currentBucket)
+                    printf(" + %d", v);
+            #endif
             if (newBucket >= 0 && (size_t)newBucket < B.size()) {
                 B[newBucket].push_back(v);
                 //printf("%d ", v);
@@ -137,12 +141,17 @@ public:
             // light edges phase
             
             while (!B[i].empty()) {
-                //printf("\n bucket %d: ", i);
+                printf("\n bucket %d: \n", i);
+                #ifdef PRINT
+                printf("\n bucket %d: ", i);
+                #endif
                 vector<pair<int,int>> Req;
                 // iterate local copy to avoid issues if bucket changes
                 vector<int> bucket_copy = B[i];
                 for (int u : bucket_copy) {
-                    //printf("%d ", u);
+                    #ifdef PRINT
+                    printf("%d ", u);
+                    #endif
                     if (u < 0 || (size_t)u >= n) continue;
                     //printf("Total edgs for node %d: %zu\n", u, G.row_ptr[u+1]-G.row_ptr[u]);
                     size_t start = G.row_ptr[u];
@@ -168,9 +177,9 @@ public:
                 for (auto &p : Req) relax(p.first, p.second, i);
                 //printf("\n");
 
-                // for (int i = 0; i < n; ++i) {
-                // printf("dist[%d] = %d - ", i, tent[i] == INF ? -1 : tent[i]);
-                // }
+                for (int i = 651; i < 652; ++i) {
+                printf("dist[%d] = %d - ", i, tent[i] == INF ? -1 : tent[i]);
+                }
             }
             
 
@@ -189,8 +198,12 @@ public:
                     }
                 }
             }
-            //printf("Heavy relax: ");   
+            printf("\n Heavy relax: \n");   
             for (auto &p : ReqHeavy) relax(p.first, p.second, i);
+
+            for (int i = 651; i < 652; ++i) {
+                printf("dist[%d] = %d - ", i, tent[i] == INF ? -1 : tent[i]);
+                }
 
             //printf(" \r\n");
             ++i;

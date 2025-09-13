@@ -132,7 +132,7 @@ int main(int argc, char** argv)
 
             std::chrono::high_resolution_clock::time_point start_cpu, end_cpu, start_gpu, end_gpu;
             std::chrono::milliseconds diff_cpu, diff_gpu;
-            //G.print_CSR();
+            G.print_CSR();
 
             start_gpu = std::chrono::high_resolution_clock::now();
             delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
