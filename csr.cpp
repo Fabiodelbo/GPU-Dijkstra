@@ -141,8 +141,9 @@ public:
             // light edges phase
             
             while (!B[i].empty()) {
-                printf("\n bucket %d: \n", i);
                 #ifdef PRINT
+                printf("\n bucket %d: \n", i);
+                
                 printf("\n bucket %d: ", i);
                 #endif
                 vector<pair<int,int>> Req;
@@ -163,6 +164,9 @@ public:
                         if (w <= delta) {
                             // if node u has been reached so we can relax its edges
                             //printf(" -> %d ",v);
+                            // if(v == 55 || v == 88){
+                            //      printf("%d-> (%d) old=%d newd = (%d + %d )%d\n", v, u, tent[v], tent[u], w ,tent[u] + w);
+                            // }
                             if (tent[u] != INF) 
                                 Req.emplace_back(v, tent[u] + w);
                                 
@@ -177,9 +181,9 @@ public:
                 for (auto &p : Req) relax(p.first, p.second, i);
                 //printf("\n");
 
-                for (int i = 651; i < 652; ++i) {
-                printf("dist[%d] = %d - ", i, tent[i] == INF ? -1 : tent[i]);
-                }
+                // for (int i = 55; i < 56; ++i) {
+                // printf("dist[%d] = %d - ", i, tent[i] == INF ? -1 : tent[i]);
+                // }
             }
             
 
@@ -193,6 +197,9 @@ public:
                     int v = G.col_ind[j];
                     int w = G.weights[j];
                     if (w > delta) {
+                        // if(v == 55 || v == 88){
+                        //          printf("%d-> (%d) old=%d newd = (%d + %d )%d\n", v, u, tent[v], tent[u], w ,tent[u] + w);
+                        //     }
                         if (tent[u] != INF) 
                             ReqHeavy.emplace_back(v, tent[u] + w);
                     }
@@ -201,9 +208,9 @@ public:
             printf("\n Heavy relax: \n");   
             for (auto &p : ReqHeavy) relax(p.first, p.second, i);
 
-            for (int i = 651; i < 652; ++i) {
-                printf("dist[%d] = %d - ", i, tent[i] == INF ? -1 : tent[i]);
-                }
+            // for (int i = 55; i < 56; ++i) {
+            //     printf("dist[%d] = %d - ", i, tent[i] == INF ? -1 : tent[i]);
+            //     }
 
             //printf(" \r\n");
             ++i;

@@ -22,6 +22,7 @@ void graph_generator(short* graph, int vertex);
 void compare_dist(short *dist_cpu, short *dist_gpu);
 void compare_dist_tent(vector<int> dist_cpu, short *dist_gpu);
 void compare_dist_csr(vector<int> dist_cpu, int *dist_gpu);
+void compare_dist_delta_dijkstra(int* dist_cpu, short *dist_gpu);
 
 
 // driver program to test above function
@@ -124,30 +125,29 @@ int main(int argc, char** argv)
                 free(dist_gpu), free(gen_graph);
         }
         break;
-        case 3:{
+        case 3:{// comparing Δ-stepping cpu with GPU version timing and result
             int *dist_gpu = (int *)malloc(VERTEX*sizeof(int*));
             size_t *row_ptr = &G.row_ptr[0];
             int *col_ind = &G.col_ind[0];
             int *weights = &G.weights[0];
+            if(dist_gpu == NULL){
+                printf("Error during memory allocation");
+                exit(EXIT_FAILURE);
+                }
 
             std::chrono::high_resolution_clock::time_point start_cpu, end_cpu, start_gpu, end_gpu;
             std::chrono::milliseconds diff_cpu, diff_gpu;
-            G.print_CSR();
 
             start_gpu = std::chrono::high_resolution_clock::now();
             delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
             //delta_stepping_gpu_shared(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
             //delta_stepping_gpu_persistent_full(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu);
             end_gpu = std::chrono::high_resolution_clock::now();
-            printf("DeltaStepping GPU end:\n");
+            printf("DeltaStepping GPU end-----------\n");
             start_cpu = std::chrono::high_resolution_clock::now();
             ds.run(0);
             end_cpu = std::chrono::high_resolution_clock::now();
-            printf("DeltaStepping CPU end:\n");
-            // print distances (example)
-            // for (int i = 0; i < VERTEX; ++i) {
-            //     printf("dist[%d] = %d\n", i, dist_gpu[i]==INF? -1 : dist_gpu[i]);
-            // }
+            printf("DeltaStepping CPU end-----------\n");
             compare_dist_csr(ds.tent, dist_gpu);
 
             diff_cpu = std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu);
@@ -160,6 +160,78 @@ int main(int argc, char** argv)
 
             free(dist_gpu);
 
+        }
+        break;
+        case 4:{ // comparing Δ-stepping GPU with dijkstra GPU
+                short *gen_graph = (short *)malloc(VERTEX*VERTEX*sizeof(short*));
+                short *dist_gpu = (short *)malloc(VERTEX*sizeof(short*));
+                int *dist_gpu_delta = (int *)malloc(VERTEX*sizeof(int*));
+
+                if(gen_graph == NULL || dist_gpu == NULL || dist_gpu_delta == NULL){
+                    printf("Error during memory allocation");
+                    exit(EXIT_FAILURE);
+                }
+                //generate graph in dense format
+                size_t *row_ptr = &G.row_ptr[0];
+                int *col_ind = &G.col_ind[0];
+                int *weights = &G.weights[0];
+
+                CRS_to_dense(gen_graph, G);
+                DeltaStepping ds(G, delta);
+
+                std::chrono::high_resolution_clock::time_point start_gpu_delta, end_gpu_delta, start_gpu_dijkstra, end_gpu_dijkstra;
+                std::chrono::milliseconds diff_dijkstra, diff_delta;
+
+                start_gpu_dijkstra = std::chrono::high_resolution_clock::now();
+                // Δ-stepping
+                dijkstra_parallelize_shared_atomic(gen_graph, 0, dist_gpu);
+                end_gpu_dijkstra = std::chrono::high_resolution_clock::now();
+                printf("Dijkstra GPU end-----------\n");
+                start_gpu_delta = std::chrono::high_resolution_clock::now();
+                delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu_delta);
+                end_gpu_delta = std::chrono::high_resolution_clock::now();
+                printf("DeltaStepping GPU end-----------\n");
+
+                compare_dist_delta_dijkstra(dist_gpu_delta, dist_gpu);
+
+                diff_dijkstra = std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu_dijkstra - start_gpu_dijkstra);
+                diff_delta = std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu_delta - start_gpu_delta);
+                float time_dijkstra = diff_dijkstra.count();
+                float time_delta = diff_delta.count();
+                std::cout<<"Time duration dijkstra function: "<<time_dijkstra<<" ms"<<std::endl;
+                std::cout<<"Time duration delta kernel: "<<time_delta<<" ms"<<std::endl;
+                std::cout<<"speed up: "<<(float)100-(float)(100/time_dijkstra*time_delta)<<" %"<<std::endl;
+
+                free(dist_gpu), free(dist_gpu_delta), free(gen_graph);
+        }
+        break;
+        case 5:{ // Δ-stepping GPU
+                int *dist_gpu_delta = (int *)malloc(VERTEX*sizeof(int*));
+
+                if(dist_gpu_delta == NULL){
+                    printf("Error during memory allocation");
+                    exit(EXIT_FAILURE);
+                }
+                //generate graph in dense format
+                size_t *row_ptr = &G.row_ptr[0];
+                int *col_ind = &G.col_ind[0];
+                int *weights = &G.weights[0];
+
+                DeltaStepping ds(G, delta);
+
+                std::chrono::high_resolution_clock::time_point start_gpu_delta, end_gpu_delta, start_gpu_dijkstra, end_gpu_dijkstra;
+                std::chrono::milliseconds diff_dijkstra, diff_delta;
+
+                start_gpu_delta = std::chrono::high_resolution_clock::now();
+                delta_stepping_gpu_device_buckets(G.n, G.m, row_ptr, col_ind, weights, 0, ds.delta, dist_gpu_delta);
+                end_gpu_delta = std::chrono::high_resolution_clock::now();
+                printf("DeltaStepping GPU end-----------\n");
+
+                diff_delta = std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu_delta - start_gpu_delta);
+                float time_delta = diff_delta.count();
+                std::cout<<"Time duration delta kernel: "<<time_delta<<" ms"<<std::endl;
+
+                free(dist_gpu_delta);
         }
         break;
         default : {
@@ -233,6 +305,18 @@ void compare_dist(short *dist_cpu, short *dist_gpu){
 }
 
 void compare_dist_tent(vector<int> dist_cpu, short *dist_gpu){
+    bool equal = 1;
+    for(int i = 0; i<VERTEX; i++){
+        if(dist_cpu[i] != dist_gpu[i]){
+            printf("dist_tent[%d] != dist_gpu[%d] (%hu != %hu)\r\n",i,i,dist_cpu[i], dist_gpu[i] );
+            equal = 0;
+        }
+    }
+    if(equal)
+        printf("Result are equal!\r\n");
+}
+
+void compare_dist_delta_dijkstra(int* dist_cpu, short *dist_gpu){
     bool equal = 1;
     for(int i = 0; i<VERTEX; i++){
         if(dist_cpu[i] != dist_gpu[i]){

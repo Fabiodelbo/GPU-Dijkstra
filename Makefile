@@ -87,15 +87,21 @@ clean:
 	$(RM) -r bin/ *.txt
 
 
-run-d:
+run-dijk:
 	./${EXE} 0 > stdout.txt 2> stderr.txt
 
-run-a:
+run-delta:
 	./${EXE} 1 > stdout.txt 2> stderr.txt
 
-run-both:
+run-check-correctness-delta:
 	./${EXE} 2 > stdout.txt 2> stderr.txt
 
-run-delta-naive:
+run-delta-compare:
 	./${EXE} 3 > stdout.txt 2> stderr.txt
+
+run-delta-dijk:
+	./${EXE} 4 > stdout.txt 2> stderr.txt
+
+run-delta-naive:
+	./${EXE} 5 > stdout.txt 2> stderr.txt
 

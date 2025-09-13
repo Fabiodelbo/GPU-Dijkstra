@@ -2,8 +2,8 @@
 
 // Number of vertices in the graph
 //35000 nodes are 4.56 GB of memory
-#define VERTEX 1000
-#define AVG_DEG 10
+#define VERTEX 50000
+#define AVG_DEG 1000
 #define DELTA 50//for delta-stepping
 
 #define BLOCK_DIM 512
