@@ -33,8 +33,9 @@ struct CSRGraph {
     {}
     
     void CSR_generate(){
-        //mt19937 rng(time(NULL));
-        mt19937 rng(2024);
+        printf("Graph generation-------");
+        mt19937 rng(time(NULL));
+        //mt19937 rng(2024);
         //set reange of random destination node and weight
         uniform_int_distribution<int> dist_node(0, int(n)-1);
         uniform_int_distribution<int> dist_weight(1, 100);
@@ -59,6 +60,7 @@ struct CSRGraph {
             col_ind.resize(m);
             weights.resize(m);
         }
+        printf("Grph generation end");
     }
     void print_CSR(){
         printf("row_ptr: ");

@@ -20,6 +20,22 @@
 
 constexpr int INF = 0x3f3f3f3f;
 
+void print_gpu_properties() {
+
+    cudaDeviceProp p;
+    cudaGetDeviceProperties(&p, 0);
+
+    printf("Printing CUDA device informations...\n");
+    printf("Device name:\t\t\t\t\t\t%s\n", p.name);
+    printf("Amount of Global memory (bytes):\t\t\t%lu\n", p.totalGlobalMem);
+    printf("Maximum amount of Shared memory per block (bytes):\t%lu\n", p.sharedMemPerBlock);
+    printf("Amount of Constant memory (bytes):\t\t\t%lu\n", p.totalConstMem);
+    printf("Number of SM:\t\t\t\t\t\t%d\n", p.multiProcessorCount);
+    printf("Concurrent kernels supported:\t\t\t\t%d\n", p.concurrentKernels);
+    printf("\n");
+
+}
+
 
 __device__ unsigned long long global_min = 0x7FFFFFFF<<32;
 __device__ int global_u = 0;
@@ -420,13 +436,13 @@ inline void gpuAssert(cudaError_t code, const char *file, int line) {
 
 // --- Light edges kernel (device buckets, simpler version)
 __global__ void kernel_light_step(
-    const int* frontier, int frontier_size,
+    const int* frontier, int frontier_size, int n,
     const size_t* row_ptr, const int* col_ind, const int* weights,
     int* tent, int delta, int bucket_idx,
     int* next_frontier, int* next_cnt,
     int* future_buckets,
-    int* d_heavy_nodes, int* pos_heavy,
-    int* d_next_bucket)
+    int* d_heavy_nodes, int* pos_heavy, int* bucket_heavy,
+    int* d_next_bucket, int current_gen, int* gen_seen)
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= frontier_size) return;
@@ -456,14 +472,16 @@ __global__ void kernel_light_step(
             if (newd < old) {
                 int newBucket = newd / delta;
                 int oldBucket = atomicMin(&future_buckets[v], newBucket);
+                // try to mark the vertex seen in this generation, is it is already seen in this generation we don't have to add it to next_frontier because it is already added
+                int old_gen = atomicMax(&gen_seen[v], current_gen);
                 if(newBucket <= oldBucket){
-                    if (newBucket == bucket_idx) {
+                    if (newBucket == bucket_idx && old_gen < current_gen) {
                             // new bucket for v edge is the actual bucket
                             int pos = atomicAdd(next_cnt, 1);
                             next_frontier[pos] = v;
                             // Inside computing of nexr t bucket to be processed
                             atomicMin(d_next_bucket, newBucket);
-                    } else {                    
+                    } else if(newBucket != oldBucket) {                    
                         // edge is already in a lower bucket so it will be processed later
                         atomicMin(d_next_bucket, newBucket);
                     }
@@ -477,15 +495,22 @@ __global__ void kernel_light_step(
     }
 
     if (have_heavy) {
-        // based on prevoius iteration we should never had duplicate heavy nodes
-        int pos = atomicAdd(pos_heavy, 1);
-        if (pos >= 0) {
-            // d_heavy_nodes buffer was allocated with size >= n, so this should be safe
-            d_heavy_nodes[pos] = u;
-        } else {
-            // out-of-space (unlikely if d_heavy_nodes has size n)
-            //printf("Out of space in heavy nodes array\n");
+        // it has not to be inserted in heavy in any light phase iteration of this bucket
+        int heavy = atomicMax(&bucket_heavy[u], bucket_idx);
+        if(heavy < bucket_idx){
+            //node has not been added to heavy nodes for this bucket
+            //this will save space not adding multiple times the same node
+            int pos = atomicAdd(pos_heavy, 1);
+            if (pos >= 0 && pos < n) {
+                // d_heavy_nodes buffer was allocated with size >= n, so this should be safe
+                d_heavy_nodes[pos] = u;
+            } else {
+                // out-of-space (unlikely if d_heavy_nodes has size n)
+                printf("Out of space in heavy nodes array\n");
+                return;
+            }
         }
+        
     }
 }
 
@@ -583,6 +608,10 @@ void delta_stepping_gpu_device_buckets(
     CUDA_CHECK(cudaMalloc(&d_next_bucket, sizeof(int)));
     int infv = INT_MAX;
     CUDA_CHECK(cudaMemcpy(d_next_bucket, &infv, sizeof(int), cudaMemcpyHostToDevice));
+    int *seen_gen;
+    CUDA_CHECK(cudaMalloc(&seen_gen, n * sizeof(int)));
+    CUDA_CHECK(cudaMemset(seen_gen, -1, n * sizeof(int)));
+    int current_gen = 0;
 
     // allocate device arrays
     int* d_tent; CUDA_CHECK(cudaMalloc(&d_tent, n * sizeof(int)));
@@ -594,8 +623,8 @@ void delta_stepping_gpu_device_buckets(
     //TODO: optimize memory usage by reusing
     // frontier buffers (device)
     int *d_frontier, *d_next_frontier;
-    CUDA_CHECK(cudaMalloc(&d_frontier, m * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_next_frontier, m * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_frontier, n * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_next_frontier, n * sizeof(int)));
     int *d_frontier_size; 
     CUDA_CHECK(cudaMalloc(&d_frontier_size, sizeof(int)));
     int *d_next_size; 
@@ -610,6 +639,11 @@ void delta_stepping_gpu_device_buckets(
     CUDA_CHECK(cudaMalloc(&d_future_buckets, n * sizeof(int)));
     std::vector<int> tmp_proc2(n, INT_MAX); 
     CUDA_CHECK(cudaMemcpy(d_future_buckets, tmp_proc2.data(), n * sizeof(int), cudaMemcpyHostToDevice));
+
+    // heavy nodes bookkeeping
+    int* bucket_heavy;
+    CUDA_CHECK(cudaMalloc(&bucket_heavy, n * sizeof(int)));
+    CUDA_CHECK(cudaMemset(bucket_heavy, -1, n * sizeof(int)));
 
     int* d_future_cnt; 
     CUDA_CHECK(cudaMalloc(&d_future_cnt, sizeof(int)));
@@ -637,8 +671,9 @@ void delta_stepping_gpu_device_buckets(
     int zero = 0;
     CUDA_CHECK(cudaMemcpy(d_future_cnt, &zero, sizeof(int), cudaMemcpyHostToDevice));
     // host loop over buckets
-
-    for (int bucket_idx = 0; bucket_idx < max_bucket; bucket_idx++) {
+    int h_nextBucket = 0;
+    printf("Starting delta-stepping GPU (device buckets) with delta=%d max_bucket=%d\n", delta, max_bucket);
+    while (h_nextBucket != INT_MAX) {
         // read frontier size
         int h_frontier_size = get_int_from_device(d_frontier_size);
         if (h_frontier_size == 0) continue;
@@ -651,17 +686,18 @@ void delta_stepping_gpu_device_buckets(
             // Launch kernel to process current frontier (light edges)
             int grid = (h_frontier_size + block - 1) / block;
             // For seen_gen we use a generation id to mark entries added to next_frontier:
-            #ifdef PRINT
-            printf("\n bucket %d: ", bucket_idx);
-            #endif
-           kernel_light_step<<<grid, block>>>(
-                d_frontier, h_frontier_size,
+            printf("\n bucket %d: ", h_nextBucket);
+            printf("frontier size %d\n", h_frontier_size);
+            kernel_light_step<<<grid, block>>>(
+                d_frontier, h_frontier_size, n,
                 d_row_ptr, d_col_ind, d_weights,
-                d_tent, delta, bucket_idx,
+                d_tent, delta, h_nextBucket,
                 d_next_frontier, d_next_size,
                 d_future_buckets,
-                d_heavy_nodes, pos_heavy,
-                d_next_bucket);
+                d_heavy_nodes, pos_heavy, bucket_heavy,
+                d_next_bucket,
+                current_gen, seen_gen);
+            current_gen++;
             CUDA_CHECK(cudaDeviceSynchronize());
             CUDA_CHECK(cudaGetLastError());
 
@@ -688,7 +724,7 @@ void delta_stepping_gpu_device_buckets(
             kernel_heavy_step<<<gridH, block>>>(
                 d_heavy_nodes, h_S_size,
                 d_row_ptr, d_col_ind, d_weights,
-                d_tent, delta, bucket_idx,
+                d_tent, delta, h_nextBucket,
                 d_future_buckets,
                 d_next_bucket);   // passaggio extra
             CUDA_CHECK(cudaDeviceSynchronize());
@@ -696,12 +732,10 @@ void delta_stepping_gpu_device_buckets(
         }
 
         // 1) read nextBucket (device computed minima)
-        int h_nextBucket;
+        
         CUDA_CHECK(cudaMemcpy(&h_nextBucket, d_next_bucket, sizeof(int), cudaMemcpyDeviceToHost));
         if (h_nextBucket == INT_MAX) {
             // no future bucket (shouldn't happen if h_future_cnt>0 but safe)
-            int zero_int = 0; 
-            CUDA_CHECK(cudaMemcpy(d_frontier_size, &zero_int, sizeof(int), cudaMemcpyHostToDevice));
             printf("\nNo next bucket found\n");
             continue;
         }
@@ -739,9 +773,11 @@ void delta_stepping_gpu_device_buckets(
         
     } // end bucket loop
 
+    printf("-Moving data back to host\n");
     // copy back tent
     std::vector<int> h_tent(n);
     CUDA_CHECK(cudaMemcpy(dist_h, d_tent, n * sizeof(int), cudaMemcpyDeviceToHost));
+    printf("-End moving data back to host\n");
 
     // free
     cudaFree(d_row_ptr); cudaFree(d_col_ind); cudaFree(d_weights);

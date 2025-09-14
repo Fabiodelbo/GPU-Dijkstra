@@ -1,8 +1,59 @@
-algo is: 5DeltaStepping fields:
+algo is: 3Graph generation-------Grph generation endDeltaStepping fields:
 delta: 50
-graph vertices: 50000
-graph edges: 50000000
+graph vertices: 10000
+graph edges: 2000000
+Starting delta-stepping GPU (device buckets) with delta=50 max_bucket=20000
+
+ bucket 0: frontier size 1
+
+ bucket 0: frontier size 102
+
+ bucket 0: frontier size 3077
+
+ bucket 0: frontier size 5933
+
+ bucket 0: frontier size 7213
+
+ bucket 0: frontier size 5661
+
+ bucket 0: frontier size 3537
+
+ bucket 0: frontier size 1761
+
+ bucket 0: frontier size 577
+
+ bucket 0: frontier size 126
+
+ bucket 0: frontier size 11
+
+ bucket 0: frontier size 9999
+
+ bucket 0: frontier size 531
+
+ bucket 0: frontier size 630
+
+ bucket 0: frontier size 665
+
+ bucket 0: frontier size 576
+
+ bucket 0: frontier size 348
+
+ bucket 0: frontier size 134
+
+ bucket 0: frontier size 29
+
+ bucket 0: frontier size 1
+
+ bucket 0: frontier size 2737
 
 No next bucket found
+-Moving data back to host
+-End moving data back to host
 DeltaStepping GPU end-----------
-Time duration delta kernel: 7565 ms
+
+ Heavy relax: 
+DeltaStepping CPU end-----------
+Result are equal!
+Time duration CPU function: 4583 ms
+Time duration GPU kernel: 205 ms
+speed up: 95.5269 %

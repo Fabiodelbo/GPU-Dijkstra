@@ -103,5 +103,8 @@ run-delta-dijk:
 	./${EXE} 4 > stdout.txt 2> stderr.txt
 
 run-delta-naive:
-	./${EXE} 5 > stdout.txt 2> stderr.txt
+	./${EXE} 5
+
+run-help:
+	./${EXE} 6 > stdout.txt 2> stderr.txt
 
