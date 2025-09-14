@@ -434,13 +434,6 @@ __global__ void kernel_light_step(
     if (u < 0) return;
     
 
-    // Try to claim u for this bucket. Only the thread that sees prev == -1 does the work.
-    // int prevp = atomicCAS(&proc_gen[u], -1, bucket_idx);
-    // if (prevp != -1) {
-    //     // another thread already processed u for this bucket -> skip
-    //     return;
-    // }
-    //printf("frontier [%d] = %d ", tid, frontier[tid]);
     int du = tent[u];
     if (du == INF) return;
 
@@ -456,48 +449,30 @@ __global__ void kernel_light_step(
         int v = col_ind[e];
         int w = weights[e];
         if (w <= delta) {
-            //printf("%d ", v);
             int newd = du + w;
             // atomicMin returns old value; if newd < old then current thread won the update
             int old = atomicMin(&tent[v], newd);
-            // if(v == 55 || v == 88){
-            //          printf("%d-> (%d) old=%d newd = (%d + %d)%d\n", v, u, old, du, w, newd);
-            // }
+
             if (newd < old) {
                 int newBucket = newd / delta;
                 int oldBucket = atomicMin(&future_buckets[v], newBucket);
                 if(newBucket <= oldBucket){
                     if (newBucket == bucket_idx) {
-                            // if oldBucket == -1 new bucket is already in future_buckets[v] otherwise always lower buckets wins
-                            // also if it is already in next it is ok because we are in the same bucket and not duplicated
-                            //atomicMin(&future_buckets[v], newBucket); // always keep tracking of the bucket current or future
-
-                            // if oldBucket != -1 then it is not in future but if it is already we have a future_cnt that should be lowered but we can't do it
+                            // new bucket for v edge is the actual bucket
                             int pos = atomicAdd(next_cnt, 1);
                             next_frontier[pos] = v;
-                            //if it was in future and now it is in next we have to decrease future cnt
-                            /*if(oldBucket > bucket_idx && oldBucket != INT_MAX){
-                                atomicSub(future_cnt, 1);
-                            }*/
-                           atomicMin(d_next_bucket, newBucket);
+                            // Inside computing of nexr t bucket to be processed
+                            atomicMin(d_next_bucket, newBucket);
                     } else {                    
-                        //if not alrady in no bucket yet or in a higher bucket
-                        if (oldBucket == INT_MAX ) {
-                            /*if(oldBucket == INT_MAX) {
-                                // only if it is not in any bucket yet we have to add it to future nodes
-                                int pos = atomicAdd(future_cnt, 1);
-                            }*/
-                            //future_nodes[pos]   = v;
-                            //future_buckets[v] = newBucket;
-                            
-                        }atomicMin(d_next_bucket, newBucket);
+                        // edge is already in a lower bucket so it will be processed later
+                        atomicMin(d_next_bucket, newBucket);
                     }
                 }
             }
         } else {
             // heavy edge: mark that u has heavy outgoing edges; heavy edges handled later
             have_heavy = true;
-            // note: do NOT update tent[v] or seen_gen here; heavy kernel will do that
+            // NOT update tent[v]; heavy kernel will do that
         }
     }
 
@@ -507,7 +482,6 @@ __global__ void kernel_light_step(
         if (pos >= 0) {
             // d_heavy_nodes buffer was allocated with size >= n, so this should be safe
             d_heavy_nodes[pos] = u;
-            //printf(" Heavy node: %d at pos %d\n", u, pos);
         } else {
             // out-of-space (unlikely if d_heavy_nodes has size n)
             //printf("Out of space in heavy nodes array\n");
@@ -532,18 +506,16 @@ __global__ void kernel_heavy_step(
 
     size_t start = row_ptr[u];
     size_t end   = row_ptr[u+1];
+    // take all the edges from the current vertex; choose only the heavy ones
     for (size_t e = start; e < end; ++e) {
         int v = col_ind[e];
         int w = weights[e];
         if (w > delta) {
             int newd = du + w;
             int old = atomicMin(&tent[v], newd);
+            // only if we find a shorter path to v we update future_buckets
             if (newd < old) {
-                // if(v == 55 || v == 88){
-                //     printf("%d-> (%d) old=%d newd = (%d + %d)%d\n", v, u, old, du, w, newd);
-                // }
                 int newBucket = newd / delta;
-                //printf(" %d", newBucket);
                 int oldBucket = atomicMin(&future_buckets[v], newBucket);
                 atomicMin(d_next_bucket, newBucket);
             }
@@ -553,7 +525,8 @@ __global__ void kernel_heavy_step(
 
 
 // --- Collect nodes belonging to targetBucket from future arrays into frontier.
-// Note: future_buckets entries are consumed (set to -1) when collected.
+//future_buckets entries are consumed (set to -1) when collected.
+//TODO: optimize mem by deleting consumed entries (compaction)
 __global__ void kernel_collect_bucket(
     int* future_buckets, int n,
     int targetBucket,
@@ -564,16 +537,12 @@ __global__ void kernel_collect_bucket(
     if (idx >= n) return;
     
     int b = future_buckets[idx];
-    //printf("Target bucket %d -", targetBucket);
-    //printf("Thread %d processing idx %d with bucket %d\n", idx, idx, b);
+    // if not in target bucket, ignore
     if (b != targetBucket) return;
 
     int v = idx;
-    //printf(" %d ", v);
-    //printf(" bucket %d -", b);
-    // try to mark seen for this generation
     
-    //printf("Adding %d to frontier\n", v);
+    // add to next bucket
     int pos = atomicAdd(frontier_cnt, 1);
     frontier[pos] = v;
     
@@ -622,6 +591,7 @@ void delta_stepping_gpu_device_buckets(
     h_tent_init[source] = 0;
     CUDA_CHECK(cudaMemcpy(d_tent, h_tent_init.data(), n * sizeof(int), cudaMemcpyHostToDevice));
 
+    //TODO: optimize memory usage by reusing
     // frontier buffers (device)
     int *d_frontier, *d_next_frontier;
     CUDA_CHECK(cudaMalloc(&d_frontier, m * sizeof(int)));
@@ -663,9 +633,6 @@ void delta_stepping_gpu_device_buckets(
     int max_weight = 100; // since CSR_generate uses 1..10; adjust otherwise
     int max_bucket = ((n > 0 ? (n - 1) : 0) * max_weight) / max(1, delta) + 2;
 
-    // generation counter for seen_gen dedup: use increasing int
-    int gen = 1;
-
     // reset S_size and proc_gen for nodes? proc_gen uses bucket_idx checks; we don't need to reset whole array.
     int zero = 0;
     CUDA_CHECK(cudaMemcpy(d_future_cnt, &zero, sizeof(int), cudaMemcpyHostToDevice));
@@ -684,7 +651,6 @@ void delta_stepping_gpu_device_buckets(
             // Launch kernel to process current frontier (light edges)
             int grid = (h_frontier_size + block - 1) / block;
             // For seen_gen we use a generation id to mark entries added to next_frontier:
-            int seen_gen_val = gen;
             #ifdef PRINT
             printf("\n bucket %d: ", bucket_idx);
             #endif
@@ -695,57 +661,30 @@ void delta_stepping_gpu_device_buckets(
                 d_next_frontier, d_next_size,
                 d_future_buckets,
                 d_heavy_nodes, pos_heavy,
-                d_next_bucket);   // passaggio extra
+                d_next_bucket);
             CUDA_CHECK(cudaDeviceSynchronize());
             CUDA_CHECK(cudaGetLastError());
-            //printf(" \r\n");
 
             // get next_size
             int h_next_size = get_int_from_device(d_next_size);
-            
-
-            // int *h_tent = (int *)malloc(n * sizeof(int));
-            // CUDA_CHECK(cudaMemcpy(h_tent, d_tent, n * sizeof(int), cudaMemcpyDeviceToHost));
-            // for (int i = 55; i < 56; ++i) {
-            //     printf("dist[%d] = %d - ", i, h_tent[i] == INF ? -1 : h_tent[i]);
-            // }
 
             // if no new nodes in next frontier => light-phase stable
             if (h_next_size == 0) break;
 
-            //swap frontier arrays: d_frontier <- d_next_frontier
-            //printf(" Next size: %d ", h_next_size);
-            // swap frontier arrays: d_frontier <- d_next_frontier
-            // CUDA_CHECK(cudaMemcpy(d_frontier, d_next_frontier, h_next_size * sizeof(int), cudaMemcpyDeviceToDevice));
-            // CUDA_CHECK(cudaMemcpy(d_frontier_size, &h_next_size, sizeof(int), cudaMemcpyHostToDevice));
+            // swap frontiers and continue light-phase
             int* tmp = d_frontier; d_frontier = d_next_frontier; d_next_frontier = tmp;
             h_frontier_size = h_next_size;
-            gen++; // advance generation for next dedup round
             
         } // end light-phase stabilization
-        
-
-        // int h_next_bucket = get_int_from_device(d_next_bucket);
-        // printf("\nNext bucket: %d\n", h_next_bucket);
-        // int h_future_cnt = get_int_from_device(d_future_cnt);
-        // printf("Future cnt before heavy: %d\n", h_future_cnt);
-
-        //CUDA_CHECK(cudaMemset(pos_heavy, 0, sizeof(int)));
-        //printf("min next bucket after light phase: %d\n", h_next_bucket);
 
         int h_pos_heavy = get_int_from_device(pos_heavy);
         CUDA_CHECK(cudaMemset(pos_heavy, 0, sizeof(int)));
 
         // Heavy-phase: process S and append future candidates
-        //printf("future_cap = %d\n", future_cap);
-        //printf("future_cnt = %d\n", get_int_from_device(d_future_cnt));
-        //printf("\n Heavy step \n");
 
         int h_S_size = h_pos_heavy;
         if (h_S_size > 0) {
-            //printf("Heavy nodes: \n");
             int gridH = (h_S_size + block - 1) / block;
-            //CUDA_CHECK(cudaMemset(d_future_cnt, 0, sizeof(int)));
             kernel_heavy_step<<<gridH, block>>>(
                 d_heavy_nodes, h_S_size,
                 d_row_ptr, d_col_ind, d_weights,
@@ -755,24 +694,6 @@ void delta_stepping_gpu_device_buckets(
             CUDA_CHECK(cudaDeviceSynchronize());
             CUDA_CHECK(cudaGetLastError());
         }
-        // h_next_bucket = get_int_from_device(d_next_bucket);
-        // printf("\nNext bucket: %d\n", h_next_bucket);
-        
-        // int *h_tent = (int *)malloc(n * sizeof(int));
-        //     CUDA_CHECK(cudaMemcpy(h_tent, d_tent, n * sizeof(int), cudaMemcpyDeviceToHost));
-        //     for (int i = 55; i < 56; ++i) {
-        //         printf("dist[%d] = %d - ", i, h_tent[i] == INF ? -1 : h_tent[i]);
-        //     }
-
-        //how many future nodes i have in the next buckets all together
-        // h_future_cnt = get_int_from_device(d_future_cnt);
-        // printf("Future cnt after heavy: %d\n", h_future_cnt);
-
-        /*if (h_future_cnt == 0) {
-            int zero_int = 0; 
-            CUDA_CHECK(cudaMemcpy(d_frontier_size, &zero_int, sizeof(int), cudaMemcpyHostToDevice));
-            continue;
-        }*/
 
         // 1) read nextBucket (device computed minima)
         int h_nextBucket;
@@ -784,15 +705,13 @@ void delta_stepping_gpu_device_buckets(
             printf("\nNo next bucket found\n");
             continue;
         }
-        //printf("Next bucket to process: %d\n", h_nextBucket);
-        
+
         // 2) prepare frontier counter
         int zero_int = 0;
         CUDA_CHECK(cudaMemcpy(d_frontier_size, &zero_int, sizeof(int), cudaMemcpyHostToDevice)); // reuse d_frontier_size as device-side counter
 
         // 3) launch collect kernel to gather nodes of bucket h_nextBucket
         int gridC = (n + block - 1) / block;
-        int gen_val = ++gen; // advance generation for dedup
         kernel_collect_bucket<<<gridC, block>>>(
             d_future_buckets, n,
             h_nextBucket,
@@ -802,7 +721,6 @@ void delta_stepping_gpu_device_buckets(
 
         // 4) read new frontier size
         int new_frontier_size = get_int_from_device(d_frontier_size);
-        // e se devo saltare un bucket perchè è vuoto e quello dopo è pieno?
 
         if (new_frontier_size == 0) {
             // nothing to do; reset next_bucket and continue
@@ -824,10 +742,6 @@ void delta_stepping_gpu_device_buckets(
     // copy back tent
     std::vector<int> h_tent(n);
     CUDA_CHECK(cudaMemcpy(dist_h, d_tent, n * sizeof(int), cudaMemcpyDeviceToHost));
-    // // print a sample
-    // for (int i = 0; i < min(n, 50); ++i) {
-    //     printf("dist[%d] = %d\n", i, h_tent[i] == INF ? -1 : h_tent[i]);
-    // }
 
     // free
     cudaFree(d_row_ptr); cudaFree(d_col_ind); cudaFree(d_weights);
