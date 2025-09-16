@@ -86,7 +86,6 @@ $(OBJ_DIR):
 clean:
 	$(RM) -r bin/ *.txt
 
-
 run-dijk:
 	./${EXE} 0 > stdout.txt 2> stderr.txt
 
@@ -102,9 +101,12 @@ run-delta-compare:
 run-delta-dijk:
 	./${EXE} 4 > stdout.txt 2> stderr.txt
 
-run-delta-naive:
-	./${EXE} 5
+run-delta-gpu:
+	./${EXE} 5 > stdout.txt 2> stderr.txt
 
 run-help:
-	./${EXE} 6 > stdout.txt 2> stderr.txt
+	./${EXE} 6
+
+run-shared-compare:
+	./${EXE} 7 > stdout.txt 2> stderr.txt
 
